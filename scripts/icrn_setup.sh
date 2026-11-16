@@ -15,31 +15,42 @@ echo "== GPU"; nvidia-smi --query-gpu=name,memory.total --format=csv || echo "No
 echo "== Python packages"
 python3 -m pip install -q --user -r requirements.txt
 
-echo "== Node"
+echo "== Node (optional: only for the final node --test check)"
+# Home on these servers is often a network filesystem where tar fails ("Directory renamed before its status
+# could be extracted"), so unpack on local disk first and copy the result home.
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/ctxdrift.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
 if ! command -v node >/dev/null; then
   V=v22.11.0
-  curl -fsSL "https://nodejs.org/dist/$V/node-$V-linux-x64.tar.xz" | tar -xJ -C "$PREFIX"
-  rm -rf "$PREFIX/node" && mv "$PREFIX/node-$V-linux-x64" "$PREFIX/node"
+  if curl -fsSL -o "$TMP/node.tar.xz" "https://nodejs.org/dist/$V/node-$V-linux-x64.tar.xz" \
+     && tar -xJf "$TMP/node.tar.xz" -C "$TMP"; then
+    rm -rf "$PREFIX/node" && cp -r "$TMP/node-$V-linux-x64" "$PREFIX/node"
+  else
+    echo "Node install failed: continuing (tests_pass will show '-')."
+  fi
 fi
-node --version
+node --version || true
 
 echo "== Ollama"
 if ! command -v ollama >/dev/null; then
-  mkdir -p "$PREFIX/ollama"
-  if curl -fsSL -o /tmp/ollama.tar.zst https://ollama.com/download/ollama-linux-amd64.tar.zst; then
+  mkdir -p "$TMP/ollama"
+  if curl -fsSL -o "$TMP/ollama.tar.zst" https://ollama.com/download/ollama-linux-amd64.tar.zst; then
     if command -v zstd >/dev/null; then
-      zstd -dc /tmp/ollama.tar.zst | tar -x -C "$PREFIX/ollama"
+      zstd -dc "$TMP/ollama.tar.zst" > "$TMP/ollama.tar"
     else
       python3 -m pip install -q --user zstandard
-      python3 -c "import zstandard,sys; zstandard.ZstdDecompressor().copy_stream(open('/tmp/ollama.tar.zst','rb'), open('/tmp/ollama.tar','wb'))"
-      tar -xf /tmp/ollama.tar -C "$PREFIX/ollama"
+      python3 -c "import zstandard,sys; zstandard.ZstdDecompressor().copy_stream(open(sys.argv[1],'rb'), open(sys.argv[2],'wb'))" \
+        "$TMP/ollama.tar.zst" "$TMP/ollama.tar"
     fi
+    tar -xf "$TMP/ollama.tar" -C "$TMP/ollama"
   else
-    curl -fsSL https://ollama.com/download/ollama-linux-amd64.tgz | tar -xz -C "$PREFIX/ollama"
+    curl -fsSL -o "$TMP/ollama.tgz" https://ollama.com/download/ollama-linux-amd64.tgz
+    tar -xzf "$TMP/ollama.tgz" -C "$TMP/ollama"
   fi
+  rm -rf "$PREFIX/ollama" && cp -r "$TMP/ollama" "$PREFIX/ollama"
   ln -sf "$PREFIX/ollama/bin/ollama" "$PREFIX/bin/ollama"
-  rm -f /tmp/ollama.tar.zst /tmp/ollama.tar
 fi
+ollama --version || true
 
 if ! curl -s localhost:11434 >/dev/null; then
   OLLAMA_NUM_PARALLEL=2 OLLAMA_KEEP_ALIVE=-1 nohup ollama serve > "$HOME/ollama.log" 2>&1 &
