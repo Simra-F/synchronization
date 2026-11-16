@@ -1,0 +1,13 @@
+{
+  "name": "taskbox",
+  "version": "0.3.0",
+  "description": "A tiny task list that lives in your browser.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

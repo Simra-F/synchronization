@@ -1,0 +1,6 @@
+runs/
+.env
+__pycache__/
+s_values_testing/results/
+.DS_Store
+*.zip
