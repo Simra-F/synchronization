@@ -11,12 +11,14 @@ SEED_DIR = Path(__file__).resolve().parents[1] / "sample_repository"
 
 TASK = ("Feature A: add an Export button to the Taskbox page that downloads all tasks as a CSV file "
         "(one row per task: id, title, done). Read tasks through the storage API in src/storage.js, register the "
-        "button in BUTTONS in src/components/toolbar.js, use no external libraries, and add a node:test test in tests/ "
-        "for the conversion function.")
+        "button in BUTTONS in src/components/toolbar.js, use no external libraries, and add a node:test test in a new "
+        "file tests/export.test.js that require()s the conversion function (a pure, exported function with no DOM "
+        "code). Keep every existing function and test.")
 
 # Files at the core of the MAS's task: shown first in the repo view, and changes to them are always relevant.
 FOCUS_FILES = ["src/storage.js", "src/components/toolbar.js", "index.html", "CONTRIBUTING.md", "src/app.js",
-               "tests/storage.test.js", "docs/storage-api.md"]
+               "tests/storage.test.js", "docs/storage-api.md",
+               "src/utils/format.js"]
 
 # Words that make an issue (or a newly added file/symbol) relevant to this task.
 KEYWORDS = ["export", "csv", "json", "download", "button"]

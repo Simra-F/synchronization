@@ -124,9 +124,10 @@ def main():
                 w[0 if d > 0.005 else 1 if d >= -0.005 else 2] += 1
             r, rse = mean_se(d_ret)
             f, fse = mean_se(d_fin)
-            sig = "  *" if rse and abs(r) > 2 * rse else ""
-            print(f"{m:<8}{len(d_ret):>3}{r:>+11.3f} +-{rse:.3f}{f:>+11.3f} +-{fse:.3f}{'/'.join(map(str, w)):>18}{sig}")
-        print("   * = difference larger than 2 standard errors")
+            star = lambda x, se: "*" if se and abs(x) > 2 * se else " "
+            print(f"{m:<8}{len(d_ret):>3}{r:>+10.3f}{star(r, rse)} +-{rse:.3f}{f:>+10.3f}{star(f, fse)} +-{fse:.3f}"
+                  f"{'/'.join(map(str, w)):>18}")
+        print("   * = difference larger than 2 standard errors (paired)")
 
     print("\n== Retained per subagent (changing scenarios)")
     print(f"{'mode':<8}" + "".join(f"{r:>12}" for r in ROLES))
@@ -147,17 +148,31 @@ def main():
         print(f"{m:<8} dropped: {top or 'none'}\n{'':<8} stale: {st}")
 
     print("\n== The MAS's pull requests")
+    fs = [x["feature"] for x in runs]
+    print(f"opened {sum(bool(f['files']) for f in fs)}/{len(fs)}, merged {sum(bool(f['merged']) for f in fs)}, "
+          f"tests pass {sum(f['tests_pass'] is True for f in fs)}")
     seed = load_seed() if a.tests else None
     for x in runs:
         f = x["feature"]
         line = (f"{x['scenario']:<9}{x['mode']:<7}run {x['run']}: "
                 + (f"files={','.join(f['files'])} merged={f['merged']} tests={f['tests_pass']}"
                    if f["files"] else "no files in the lead's answer (no PR)"))
+        if f.get("source") == "workspace":
+            line += " (from earlier subagents: the lead wrote no files)"
+        if f.get("dropped_symbols"):
+            line += f" DELETED existing={f['dropped_symbols']}"
+        if f.get("rewrote_tests"):
+            line += f" REWROTE tests={f['rewrote_tests']}"
         if f.get("stale_in_feature"):
             line += f" stale={f['stale_in_feature']}"
         print(line)
         if a.tests and f["files"]:
-            ok, why = node_test({**seed, **parse_files(x["final_text"], seed)})
+            mas = parse_files(x["final_text"], seed)
+            if not mas:                           # same rule as run_experiment: fall back to earlier subagents
+                for r in sorted((r for r in rows if (r["scenario"], r["mode"], r["run"]) == (x["scenario"], x["mode"], x["run"])),
+                                key=lambda r: r["hop"]):
+                    mas.update(parse_files(r["text"], seed))
+            ok, why = node_test({**seed, **mas})
             print(f"      seed + MAS files: node --test {'passes' if ok else 'FAILS'}" + (f"\n      {why}" if why and not ok else ""))
 
 

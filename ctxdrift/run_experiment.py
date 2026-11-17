@@ -73,10 +73,21 @@ def run_one(scenario, mode, run, cfg, mas_llm, mod_llm, seed_files):
         modifier.stop()
 
     # The MAS's pull request: auto-merged into main like any other contributor's
-    feature = {"files": [], "merged": None, "tests_pass": None, "stale_in_feature": []}
-    changes = parse_files(final, repo.files())
+    feature = {"files": [], "merged": None, "tests_pass": None, "stale_in_feature": [], "source": None,
+               "dropped_symbols": []}
+    current = repo.files()
+    changes = parse_files(final, current)
+    feature["source"] = "lead" if changes else None
+    if not changes:                               # the lead only summarized: ship the team's latest files
+        for r in rows:
+            changes.update(parse_files(r["text"], current))
+        feature["source"] = "workspace" if changes else None
     if changes:
         feature["files"] = sorted(changes)
+        before = extract({p: current[p] for p in changes if p in current})
+        after = extract(changes)
+        feature["dropped_symbols"] = sorted(set(before) - set(after))
+        feature["rewrote_tests"] = sorted(p for p in changes if p.startswith("tests/") and p in current)
         stale = truth.snapshot()["stale"]
         feature["stale_in_feature"] = sorted(n for n in stale if mentions(n, "\n".join(changes.values())))
         pr = repo.open_pr(f"Feature A: export button ({scenario}, mode={mode}, run {run})",

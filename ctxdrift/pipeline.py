@@ -46,7 +46,11 @@ LOOKUP_TOOL = {"type": "function", "function": {
     "name": "lookup",
     "description": "Look up the CURRENT state of a symbol name, file path, or issue/PR number (#n) in the repository's source of truth.",
     "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}}
-FILE_BLOCK = re.compile(r"(?:^|\n)[#*`\s]*([\w./-]+\.(?:js|html|css|md|json))[`*:\s]*\n```[\w-]*\n(.*?)```", re.S)
+PATH = r"([\w./-]+\.(?:js|html|css|md|json))"
+FILE_BLOCK = re.compile(r"(?:^|\n)[#*`>\s-]*(?:(?:file|path|filename|updated|new file)\s*[:=]?\s*)?[*`]*" + PATH
+                        + r"[`*:)\s]*(?:\([^)\n]*\))?[`*:\s]*\n```[\w-]*\n(.*?)```", re.S | re.I)
+# A fenced block that names its file in a first-line comment: // src/x.js, /* src/x.css */, <!-- index.html -->
+COMMENT_BLOCK = re.compile(r"```[\w-]*\n\s*(?://|/\*|<!--|#)\s*(?:file:?\s*)?" + PATH + r"[^\n]*\n(.*?)```", re.S | re.I)
 
 
 MODES = ("none", "full", "v", "drift", "hybrid", "lean")
@@ -59,7 +63,10 @@ def stages(rounds: int = 2) -> list:
 def parse_files(text: str, existing=()) -> dict:
     """Files in an answer: a path line followed by a fenced block. `storage.js` maps to `src/storage.js` if unique."""
     out = {}
-    for path, body in FILE_BLOCK.findall(text or ""):
+    found = FILE_BLOCK.findall(text or "")
+    labelled = {path for path, _ in found}
+    found += [(path, body) for path, body in COMMENT_BLOCK.findall(text or "") if path not in labelled]
+    for path, body in found:
         path = path.lstrip("./")
         if existing and path not in existing:
             matches = [p for p in existing if p.endswith("/" + path)]
