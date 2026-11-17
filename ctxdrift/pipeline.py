@@ -53,7 +53,8 @@ FILE_BLOCK = re.compile(r"(?:^|\n)[#*`>\s-]*(?:(?:file|path|filename|updated|new
 COMMENT_BLOCK = re.compile(r"```[\w-]*\n\s*(?://|/\*|<!--|#)\s*(?:file:?\s*)?" + PATH + r"[^\n]*\n(.*?)```", re.S | re.I)
 
 
-MODES = ("none", "full", "v", "drift", "hybrid", "lean")
+MODES = ("none", "full", "v", "drift", "hybrid", "lean", "lean2")
+LEAN = ("lean", "lean2")
 
 
 def stages(rounds: int = 2) -> list:
@@ -75,7 +76,7 @@ def parse_files(text: str, existing=()) -> dict:
     return out
 
 
-BRIEF_ONLY = ("planner", "researcher")
+BRIEF_ONLY = {"lean": ("planner", "researcher"), "lean2": ("planner",)}   # roles that get V's fact list only
 
 
 def _fix_names(text, changes):
@@ -115,7 +116,7 @@ def run_chain(llm, repo, task, truth, keywords=(), focus=(), mode="none", s=0, t
     focus = list(focus)
     snapshot, v0, r0 = repo.digest(focus=focus), v.version, repo.version
     snapshot_files = repo.files()
-    brief0 = v.brief(v0, snapshot_files) if mode == "lean" else ""
+    brief0 = v.brief(v0, snapshot_files) if mode in LEAN else ""
     carry, force_next = [], False                 # lean: corrections deferred to the next subagent
     synced = (v0, r0)                             # V version / repo version the delivered updates reach
     updates, context, prev_role, prev_text, prev_prompt = "", task, None, "", ""
@@ -132,11 +133,11 @@ def run_chain(llm, repo, task, truth, keywords=(), focus=(), mode="none", s=0, t
             repo_text, synced, header = repo.digest(focus=focus), (v.version, repo.version), f"v{v.version}"
         else:
             repo_text, header = snapshot, f"v{v0}"
-            if mode == "lean":
+            if mode in LEAN:
                 repo_text = brief0
-                if role not in BRIEF_ONLY:
+                if role not in BRIEF_ONLY[mode]:
                     repo_text += "".join(f"\n\n--- {p} ---\n{snapshot_files[p]}" for p in focus if p in snapshot_files)
-            if mode in ("v", "hybrid", "lean"):
+            if mode in ("v", "hybrid") + LEAN:
                 pending = v.relevant(v.diff(synced[0]), context, focus)
                 oldest = v.oldest_pending(synced[0], context, focus) if pending and t_max is not None else None
                 if force_next:
@@ -174,13 +175,14 @@ def run_chain(llm, repo, task, truth, keywords=(), focus=(), mode="none", s=0, t
                 st = {k: st[k] + st2[k] for k in ("prompt_tokens", "completion_tokens", "tool_calls", "seconds")}
                 prompt = retry
         code_fixes = deferred = 0
-        if mode == "lean":
+        if mode in LEAN:
             divergent = v.divergence(text, v0, task)
             fixable = [c for c in divergent if c.kind in ("rename", "pr")]
             text = _fix_names(text, fixable)
             code_fixes = len(fixable)
             rest = [c for c in divergent if c not in fixable]
-            if rest and role == stages(rounds)[-1]:          # the lead's output becomes the PR: re-run it once
+            # lean: re-run only the lead (its output becomes the PR); lean2: re-run any stage that diverges, like hybrid
+            if rest and (mode == "lean2" or role == stages(rounds)[-1]):
                 corrected, trigger = True, "drift"
                 net = v.relevant(v.diff(v0), context + "\n" + text, focus)
                 updates = render_updates(task, net + [c for c in carry + rest if c not in net], v0, v.version)

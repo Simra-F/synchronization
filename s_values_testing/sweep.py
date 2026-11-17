@@ -203,7 +203,7 @@ def main(argv=None):
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--rounds", type=int, default=2)
     ap.add_argument("--epsilon", type=float, default=0.01)
-    ap.add_argument("--v-mode", default="lean", choices=["v", "hybrid", "lean"], help="which V variant to sweep")
+    ap.add_argument("--v-mode", default="lean", choices=["v", "hybrid", "lean", "lean2"], help="which V variant to sweep")
     ap.add_argument("--parallel", action="store_true", help="modifier in its own thread (default: lockstep, paired seeds)")
     ap.add_argument("--no-lookup", action="store_true")
     ap.add_argument("--no-merge", action="store_true")

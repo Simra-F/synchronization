@@ -19,6 +19,7 @@ STYLE = {
     "drift": dict(color="#eda100", marker="D", linestyle="-.", label="V, output-checked"),
     "hybrid": dict(color="#e87ba4", marker="P", linestyle=":", label="V + output check"),
     "lean": dict(color="#6250d6", marker="*", linestyle="-", label="V lean (briefs + code fixes)"),
+    "lean2": dict(color="#008300", marker="X", linestyle="--", label="V lean + re-run (briefs + hybrid checks)"),
 }
 for _m, _c in (("unknown", "#7a7974"),):
     STYLE[_m] = dict(color=_c, marker="x", linestyle="-", label=_m)

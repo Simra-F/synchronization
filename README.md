@@ -74,6 +74,10 @@ of the repository, and V corrects stale facts at every handoff.
 - **`lean`, the proposed system:** `hybrid`, plus (#1) role briefs written by V from code (planner/researcher get the
   fact list only; coder/reviewer/lead get the fact list + focus files) and (#4) code-fixed corrections (stale or
   PR-only names replaced by code; other divergences sent to the next subagent; only the final lead is re-run).
+- `lean2`: lean's briefs for the planner only, and hybrid's output check at every subagent (re-run on divergence
+  instead of deferring corrections to the next subagent).
+Each PR gets one CI round (node --test + deleted-symbol check; on failure the lead fixes it once; `--no-ci` to skip).
+Analyze a run: `python3 scripts/analyze.py --tests` (standard errors, paired differences, per-subagent retention, PR failures).
 Relevance, in priority order: task issues and rules, symbols in focus files (task files + files the agents edit),
 symbols the agents named, new task-related modules. Default comparison: `--modes none,full,v,lean`.
 

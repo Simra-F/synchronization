@@ -151,6 +151,10 @@ def main():
     fs = [x["feature"] for x in runs]
     print(f"opened {sum(bool(f['files']) for f in fs)}/{len(fs)}, merged {sum(bool(f['merged']) for f in fs)}, "
           f"tests pass {sum(f['tests_pass'] is True for f in fs)}")
+    ci = [f["ci"] for f in fs if f.get("ci")]
+    if ci:
+        print(f"CI: {sum(c['first_pass'] for c in ci)}/{len(ci)} clean first time, "
+              f"{sum(c['retried'] and not c.get('after_retry') for c in ci)} fixed by the retry")
     seed = load_seed() if a.tests else None
     for x in runs:
         f = x["feature"]
@@ -163,6 +167,10 @@ def main():
             line += f" DELETED existing={f['dropped_symbols']}"
         if f.get("rewrote_tests"):
             line += f" REWROTE tests={f['rewrote_tests']}"
+        if f.get("ci"):
+            c = f["ci"]
+            line += (" CI: passed first time" if c["first_pass"] else
+                     f" CI: failed -> retried -> {'clean' if not c.get('after_retry') else 'still failing'}")
         if f.get("stale_in_feature"):
             line += f" stale={f['stale_in_feature']}"
         print(line)

@@ -23,25 +23,64 @@ from github_modifier.scenarios import LEVELS
 
 from . import plots
 from .llm import LLM
-from .pipeline import MODES, parse_files, run_chain
+from .pipeline import MODES, SYSTEM, parse_files, run_chain
 from .repo import LocalRepo
 from .symbols import extract, mentions
 from .task import CONTRIBUTORS, FACTS, FOCUS_FILES, HELPERS, KEYWORDS, REQUIREMENTS, TASK, load_seed
 
 
-def run_node_tests(files: dict):
-    """True/False = `node --test` passed/failed on these files; None = node not installed."""
+def node_test_output(files: dict):
+    """(True/False, failure lines) for `node --test` on these files; (None, "") if node is not installed."""
     if not shutil.which("node"):
-        return None
+        return None, ""
     with tempfile.TemporaryDirectory() as d:
         for path, text in files.items():
             f = Path(d) / path
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text(text)
         try:
-            return subprocess.run(["node", "--test"], cwd=d, capture_output=True, timeout=120).returncode == 0
+            p = subprocess.run(["node", "--test"], cwd=d, capture_output=True, text=True, timeout=120)
         except subprocess.TimeoutExpired:
-            return False
+            return False, "node --test timed out"
+        lines = [l.strip().replace(str(Path(d).resolve()) + "/", "").replace(d + "/", "") for l in (p.stdout + p.stderr).splitlines()
+                 if any(k in l for k in ("not ok", "Error", "error:", "expected", "actual"))]
+        return p.returncode == 0, "\n".join(lines[:12])
+
+
+def run_node_tests(files: dict):
+    """True/False = `node --test` passed/failed on these files; None = node not installed."""
+    return node_test_output(files)[0]
+
+
+def ci_problems(current: dict, changes: dict) -> list:
+    """What a CI check would flag on the MAS's pull request: deleted symbols, rewritten tests, failing tests."""
+    out = []
+    dropped = sorted(set(extract({p: current[p] for p in changes if p in current})) - set(extract(changes)))
+    if dropped:
+        out.append(f"Your edited files delete existing functions/constants: {', '.join(dropped)}. "
+                   "Output each edited file COMPLETE, keeping them.")
+    rewrote = sorted(p for p in changes if p.startswith("tests/") and p in current)
+    if rewrote:
+        out.append(f"Do not rewrite existing test files ({', '.join(rewrote)}); put new tests in tests/export.test.js.")
+    ok, why = node_test_output({**current, **changes})
+    if ok is False:
+        out.append("node --test fails:\n" + why)
+    return out
+
+
+def _files_block(files: dict) -> str:
+    return "\n\n".join(f"{p}\n```\n{t}\n```" for p, t in files.items())
+
+
+def ci_retry(llm, current: dict, changes: dict, problems: list) -> dict:
+    """One CI round, as on a real project: the lead sees the failures and fixes its pull request."""
+    prompt = (f"### TASK\n{TASK}\n\n### CI FAILED ON YOUR PULL REQUEST\n" + "\n".join(f"- {x}" for x in problems)
+              + "\n\n### THOSE FILES ON MAIN NOW\n" + _files_block({p: current[p] for p in changes if p in current})
+              + "\n\n### YOUR PULL REQUEST\n" + _files_block(changes)
+              + "\n\n### YOUR ROLE\nLEAD. Fix the pull request so CI passes. Output every changed file COMPLETE, "
+                "each preceded by its path on its own line and followed by a fenced code block.")
+    text, _ = llm.chat(SYSTEM, prompt, agent="lead-ci")
+    return {**changes, **parse_files(text, current)}
 
 
 def parse_s(value: str) -> float:
@@ -82,6 +121,13 @@ def run_one(scenario, mode, run, cfg, mas_llm, mod_llm, seed_files):
         for r in rows:
             changes.update(parse_files(r["text"], current))
         feature["source"] = "workspace" if changes else None
+    if changes and cfg.get("ci"):
+        problems = ci_problems(current, changes)
+        feature["ci"] = {"first_pass": not problems, "retried": bool(problems),
+                         "problems": [x.splitlines()[0][:160] for x in problems]}
+        if problems:
+            changes = ci_retry(mas_llm, current, changes, problems)
+            feature["ci"]["after_retry"] = [x.splitlines()[0][:160] for x in ci_problems(current, changes)]
     if changes:
         feature["files"] = sorted(changes)
         before = extract({p: current[p] for p in changes if p in current})
@@ -138,7 +184,7 @@ def make_llms(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenarios", default="static,light,moderate,heavy,churn")
-    ap.add_argument("--modes", default="none,full,v,lean", help="also: drift, hybrid")
+    ap.add_argument("--modes", default="none,full,v,lean", help="also: drift, hybrid, lean2")
     ap.add_argument("--drift-threshold", type=int, default=0, help="drift mode: re-run a stage when its output contradicts more than this many V facts")
     ap.add_argument("--runs", type=int, default=2)
     ap.add_argument("--s", type=parse_s, default=0.0, help="count bound: refresh when relevant unseen changes > s ('inf' = off)")
@@ -147,6 +193,7 @@ def main(argv=None):
     ap.add_argument("--lockstep", action="store_true", help="modifier acts between stages (reproducible) instead of in parallel")
     ap.add_argument("--no-lookup", action="store_true", help="V mode without the lookup tool")
     ap.add_argument("--no-merge", action="store_true", help="open the MAS's PR but do not auto-merge it")
+    ap.add_argument("--no-ci", action="store_true", help="skip the CI round (tests + deleted-symbol check, one fix-up by the lead)")
     ap.add_argument("--github", nargs="?", const=os.getenv("GITHUB_REPO", "Simra-F/sample_repository"),
                     help="run against the real GitHub sandbox; bare --github = $GITHUB_REPO or Simra-F/sample_repository "
                          "(default without the flag: in-memory repo)")
@@ -160,7 +207,7 @@ def main(argv=None):
         ap.error(f"unknown mode(s) {bad}; choose from {', '.join(MODES)}")
     mas_llm, mod_llm = make_llms(a)
     cfg = {"s": a.s, "t_max": None if a.t_max < 0 else a.t_max, "rounds": a.rounds, "lockstep": a.lockstep,
-           "lookup": not a.no_lookup, "github": a.github, "merge": not a.no_merge,
+           "lookup": not a.no_lookup, "github": a.github, "merge": not a.no_merge, "ci": not a.no_ci,
            "drift_threshold": a.drift_threshold}
     seed_files = load_seed()
     out = Path(a.out) / time.strftime("%Y%m%d-%H%M%S")

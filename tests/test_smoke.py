@@ -1,5 +1,6 @@
 """Offline tests (mock LLM, in-memory repo). Run: python -m pytest -q   (or: python tests/test_smoke.py)"""
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -109,6 +110,20 @@ def test_lean_briefs_and_code_fixes():
         if mode == "lean":
             assert not evaluate(final, truth.snapshot())["stale_mentions"]   # the PR text has no stale names
     assert tokens["lean"] < 0.8 * tokens["none"]
+
+
+def test_lean2_and_ci_check():
+    from ctxdrift.run_experiment import ci_problems
+    repo = LocalRepo(SEED)
+    truth = Truth(extract(SEED), FACTS)
+    m = Modifier(repo, truth, LEVELS["heavy"], REQUIREMENTS, seed=3, helpers=HELPERS)
+    rows, _ = run_chain(LLM(backend="mock"), repo, TASK, truth, KEYWORDS, FOCUS_FILES, mode="lean2", lockstep=m)
+    assert len(rows) == 7
+    bad = {"src/components/toolbar.js": 'const BUTTONS = {};\n', "tests/export.test.js": 'test("x", () => {});\n'}
+    problems = ci_problems(SEED, bad)
+    assert any("handleAdd" in p for p in problems)
+    if shutil.which("node"):
+        assert any("node --test fails" in p for p in problems)
 
 
 def test_parse_files():
